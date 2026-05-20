@@ -1,0 +1,369 @@
+openapi: 3.0.3
+info:
+  title: ShopWave Catalog API
+  description: |
+    Public product catalog for the ShopWave marketplace. Exposes product listings,
+    search, categories, and per-product reviews. Monetized with Free / Growth / Marketplace
+    subscription tiers.
+  version: 1.0.0
+  contact:
+    name: ShopWave Platform Team
+    email: platform@shopwave.com
+  x-data-class: public
+  x-api-owner: daniel@shopwave.com
+
+servers:
+  - url: http://20.6.11.167:8080/shopwave-backends/v1/catalog
+    description: Local / Tomcat
+
+tags:
+  - name: Products
+    description: Browse and search the product catalog
+  - name: Categories
+    description: Product category hierarchy
+  - name: Reviews
+    description: Customer reviews per product
+
+security:
+  - apiKey: []
+  - oauth2: [catalog:read]
+
+paths:
+  /products:
+    get:
+      operationId: listProducts
+      summary: List products
+      description: Returns a paginated list of products. Supports free-text search and filtering by category and price range.
+      tags: [Products]
+      parameters:
+        - name: q
+          in: query
+          description: Free-text search query
+          schema:
+            type: string
+          example: hiking boots
+        - name: category
+          in: query
+          description: Filter by category slug
+          schema:
+            type: string
+          example: footwear
+        - name: minPrice
+          in: query
+          description: Minimum price (USD)
+          schema:
+            type: number
+            format: double
+            minimum: 0
+        - name: maxPrice
+          in: query
+          description: Maximum price (USD)
+          schema:
+            type: number
+            format: double
+            minimum: 0
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Paginated product list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductPage'
+              example:
+                content:
+                  - id: P001
+                    name: TrailBlaze Pro Hiking Boots
+                    description: Waterproof, ankle-support hiking boots for rugged terrain
+                    price: 89.99
+                    category: footwear
+                    brand: TrailBlaze
+                    averageRating: 4.7
+                    inStock: true
+                    imageUrl: https://assets.shopwave.com/products/P001.jpg
+                total: 1
+                page: 0
+                size: 20
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /products/{productId}:
+    get:
+      operationId: getProduct
+      summary: Get product by ID
+      description: Returns the full product detail including description, pricing, and stock status.
+      tags: [Products]
+      parameters:
+        - $ref: '#/components/parameters/productId'
+      responses:
+        '200':
+          description: Product detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /products/{productId}/reviews:
+    get:
+      operationId: getProductReviews
+      summary: Get reviews for a product
+      tags: [Reviews]
+      parameters:
+        - $ref: '#/components/parameters/productId'
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Paginated review list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewPage'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /categories:
+    get:
+      operationId: listCategories
+      summary: List product categories
+      description: Returns the full category tree used to browse the catalog.
+      tags: [Categories]
+      responses:
+        '200':
+          description: Category list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Category'
+
+components:
+  parameters:
+    productId:
+      name: productId
+      in: path
+      required: true
+      description: Unique product identifier
+      schema:
+        type: string
+      example: P001
+
+  schemas:
+    Product:
+      type: object
+      required: [id, name, price, category, inStock]
+      properties:
+        id:
+          type: string
+          example: P001
+        name:
+          type: string
+          example: TrailBlaze Pro Hiking Boots
+        description:
+          type: string
+          example: Waterproof, ankle-support hiking boots for rugged terrain. Rated for trails up to 5,000 ft elevation.
+        price:
+          type: number
+          format: double
+          example: 89.99
+        category:
+          type: string
+          example: footwear
+        brand:
+          type: string
+          example: TrailBlaze
+        averageRating:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 5
+          example: 4.7
+        reviewCount:
+          type: integer
+          example: 312
+        inStock:
+          type: boolean
+          example: true
+        stockQuantity:
+          type: integer
+          example: 143
+        imageUrl:
+          type: string
+          format: uri
+          example: https://assets.shopwave.com/products/P001.jpg
+        tags:
+          type: array
+          items:
+            type: string
+          example: [hiking, waterproof, size-10]
+
+    ProductPage:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+        total:
+          type: integer
+          example: 8
+        page:
+          type: integer
+          example: 0
+        size:
+          type: integer
+          example: 20
+
+    Category:
+      type: object
+      properties:
+        slug:
+          type: string
+          example: footwear
+        name:
+          type: string
+          example: Footwear
+        productCount:
+          type: integer
+          example: 42
+
+    Review:
+      type: object
+      properties:
+        id:
+          type: string
+        productId:
+          type: string
+        author:
+          type: string
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        title:
+          type: string
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    ReviewPage:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/Review'
+        total:
+          type: integer
+        page:
+          type: integer
+        size:
+          type: integer
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: INVALID_PARAMETER
+            message: maxPrice must be greater than minPrice
+    Unauthorized:
+      description: Missing or invalid API credentials
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: UNAUTHORIZED
+            message: Valid API key or OAuth2 token required
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: NOT_FOUND
+            message: Product P999 not found
+    TooManyRequests:
+      description: Rate limit exceeded
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: RATE_LIMIT_EXCEEDED
+            message: Free tier allows 100 requests/day. Upgrade to Growth for unlimited access.
+
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key issued at subscription time (Free tier)
+    oauth2:
+      type: oauth2
+      description: OAuth2 (Growth / Marketplace tiers)
+      flows:
+        clientCredentials:
+          tokenUrl: https://auth.shopwave.com/oauth2/token
+          scopes:
+            catalog:read: Read product catalog
+            catalog:write: Manage products (admin only)

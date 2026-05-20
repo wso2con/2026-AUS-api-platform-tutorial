@@ -1,0 +1,1221 @@
+openapi: 3.0.3
+info:
+  title: Property Management API
+  description: Description. 
+  version: "1.0.0"
+  contact:
+    name: Property Management API Support
+    email: support@example.com
+    url: https://docs.example.com/pms/support
+
+servers:
+  - url: https://api.example.com/v1
+
+tags:
+  - name: Properties
+  - name: Units
+    description: >-
+      Rental inventory at the unit level: floor plans, occupancy, and links from properties to leasable spaces.
+    externalDocs:
+      url: https://docs.example.com/pms/units
+      description: Unit inventory and occupancy model
+  - name: Tenants
+    description: >-
+      Resident and commercial tenant records used for screening, onboarding, communications, and lease parties.
+    externalDocs:
+      url: https://docs.example.com/pms/tenants
+      description: Tenant lifecycle
+  - name: Leases
+    description: >-
+      Active and historical lease agreements binding tenants to units, including terms, rent schedules, and renewals.
+    externalDocs:
+      url: https://docs.example.com/pms/leases
+      description: Lease contracts and renewals
+
+paths:
+  /properties:
+    summary: Properties collection
+    get:
+      description: List properties.
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+          description: max
+          example: 25
+        - name: offset
+          in: query
+          schema:
+            type: integer
+          description: pagination offset
+          example: 0
+      responses:
+        "404":
+          description: >-
+            Returned when no matching portfolio or building record exists for the requested filters in this demo API.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        "500":
+          description: >-
+            Returned when an unexpected server-side failure prevents the property list from being generated safely for the caller.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+    post:
+      summary: Register a new property
+      operationId: duplicateDemoId
+      tags: [Properties]
+      requestBody:
+        description: body
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+            example:
+              name: "Sunset Apartments"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+        "400":
+          description: >-
+            Returned when the registration payload is invalid, for example missing required address or unit mix fields.
+        "500":
+          description: >-
+            Returned when an unexpected server-side failure prevents the property from being created safely for the caller.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /properties/{id}:
+    get:
+      summary: Get property by id
+      operationId: getPropertyByLegacyId
+      tags: [Properties]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: >-
+            Unique property identifier assigned at registration; use in renewals, work orders, and lease lookups.
+          example: "prop_001"
+      responses:
+        "200":
+          description: >-
+            Returns the property record for the given id, including identifiers agents can reuse for maintenance tickets and leases.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Property"
+        "500":
+          description: >-
+            Returned when an unexpected server-side error prevents the property record from being retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+    put:
+      summary: Replace property record
+      operationId: replace_property_snake
+      tags: [Properties]
+      security:
+        - legacyWeb: [properties:write]
+      parameters:
+        - $ref: "#/components/parameters/PropertyIdPath"
+      requestBody:
+        description: >-
+          Full replacement body for the property; include all required fields because this endpoint performs a complete replace (PUT).
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Property"
+            example:
+              id: "prop_001"
+              name: "Riverside Commons"
+      responses:
+        "200":
+          description: >-
+            Returns the updated property after the replace succeeds, including any normalized identifiers the system assigns.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Property"
+              example:
+                id: "prop_001"
+                name: "Sunset Apartment Complex"
+        "500":
+          description: >-
+            Returned when an unexpected server-side error prevents the property record from being replaced.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /properties/{propertyId}/units:
+    summary: Units for a property
+    get:
+      summary: List units for a property
+      description: >-
+        Returns all rentable units for the given property, including occupancy flags and identifiers needed to create leases or work orders.
+      operationId: listUnitsByProperty
+      tags: [Units]
+      parameters:
+        - $ref: "#/components/parameters/PropertyIdNestedPath"
+        - name: status
+          in: query
+          description: >-
+            Filter by occupancy: `occupied` means an active lease covers the unit; `vacant` means no active lease as of server evaluation time.
+          schema:
+            type: string
+            enum: [occupied, vacant]
+          example: vacant
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+          description: Maximum number of records to return
+          example: 25
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: pagination offset
+          example: 0
+      responses:
+        "200":
+          description: >-
+            Successful response containing a collection of unit records for the property, ordered by unit number when available.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Unit"
+                  total:
+                    type: integer
+                    minimum: 0
+                  meta:
+                    type: object
+                    required: [total, limit, offset, hasMore]
+                    properties:
+                      total:
+                        type: integer
+                        minimum: 0
+                      limit:
+                        type: integer
+                        minimum: 1
+                      offset:
+                        type: integer
+                        minimum: 0
+                      hasMore:
+                        type: boolean
+              example:
+                items:
+                  - id: "unit_12a"
+                    propertyId: "prop_001"
+                    unitNumber: "12A"
+                    bedrooms: 2
+                    bathrooms: 1
+                    status: "vacant"
+                  - id: "unit_12b"
+                    propertyId: "prop_001"
+                    unitNumber: "12B"
+                    bedrooms: 1
+                    bathrooms: 1
+                    status: "occupied"
+                total: 2
+                meta:
+                  total: 2
+                  limit: 25
+                  offset: 0
+                  hasMore: false
+        "404":
+          description: >-
+            Returned when the property id does not exist or the caller lacks access to that portfolio in the demo tenant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "500":
+          description: >-
+            Returned when an unexpected server-side error prevents the unit list from being generated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /tenants:
+    summary: Tenants collection
+    get:
+      summary: List tenants
+      description: >-
+        Search and page through tenant profiles; optional filters narrow results by property, lease status, or contact channel.
+      operationId: listTenants
+      tags: [Tenants]
+      parameters:
+        - name: propertyId
+          in: query
+          description: >-
+            When set, only tenants with an active or historical lease tied to this property are included in the result set.
+          schema:
+            type: string
+          example: "prop_001"
+        - name: limit
+          in: query
+          description: Maximum number of tenant records to return in a single page (server may enforce an upper bound).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+          example: 25
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: pagination offset
+          example: 0
+      responses:
+        "200":
+          description: >-
+            Paginated list of tenant summaries suitable for directory views; use GET /tenants/{tenantId} for full profile fields.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Tenant"
+                  total:
+                    type: integer
+                    minimum: 0
+                  meta:
+                    type: object
+                    required: [total, limit, offset, hasMore]
+                    properties:
+                      total:
+                        type: integer
+                        minimum: 0
+                      limit:
+                        type: integer
+                        minimum: 1
+                      offset:
+                        type: integer
+                        minimum: 0
+                      hasMore:
+                        type: boolean
+              example:
+                items:
+                  - id: "tnt_42"
+                    fullName: "Jordan Lee"
+                    email: "jordan.lee@example.com"
+                    phone: "+1-415-555-0199"
+                  - id: "tnt_43"
+                    fullName: "Alex Chen"
+                    email: "alex.chen@example.com"
+                    phone: "+1-415-555-0145"
+                total: 2
+                meta:
+                  total: 2
+                  limit: 25
+                  offset: 0
+                  hasMore: false
+        "400":
+          description: >-
+            Returned when query parameters are malformed, for example a non-numeric limit or an unknown filter combination.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "500":
+          description: >-
+            Returned when an unexpected server-side error prevents tenant search results from being returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+    post:
+      summary: Onboard a new tenant
+      description: >-
+        Creates a tenant record after application approval; does not by itself create a lease—call POST /leases afterward.
+      operationId: createTenant
+      tags: [Tenants]
+      security:
+        - legacyWeb: [tenants:write]
+      requestBody:
+        required: true
+        description: >-
+          Tenant identity and contact details required for screening exports, portal invites, and emergency notifications.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantCreate"
+            example:
+              fullName: "Jordan Lee"
+              email: "jordan.lee@example.com"
+              phone: "+1-415-555-0199"
+      responses:
+        "201":
+          description: >-
+            Tenant was created successfully; response body includes the assigned tenant id for subsequent lease and payment setup.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+              example:
+                id: "tnt_42"
+                fullName: "Jordan Lee"
+                email: "jordan.lee@example.com"
+                phone: "+1-415-555-0199"
+        "400":
+          description: >-
+            Returned when required fields are missing or validation fails on email format, phone format, or duplicate portal email.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "409":
+          description: >-
+            Returned when a tenant with the same unique contact identifier already exists in the organization directory.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "500":
+          description: >-
+            Returned when an unexpected server-side error prevents tenant onboarding from completing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /tenants/{tenantId}:
+    summary: Tenant item
+    get:
+      summary: Get tenant by id
+      description: >-
+        Returns the full tenant profile including preferences and linkage ids for active leases and payment methods (masked).
+      operationId: getTenant
+      tags: [Tenants]
+      parameters:
+        - $ref: "#/components/parameters/TenantIdPath"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+          description: Maximum number of records to return
+          example: 25
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: pagination offset
+          example: 0
+      responses:
+        "200":
+          description: >-
+            Full tenant representation for detail screens and agent-assisted support workflows that need authoritative data.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Tenant"
+                  total:
+                    type: integer
+                    minimum: 0
+                  meta:
+                    type: object
+                    required: [hasMore]
+                    properties:
+                      hasMore:
+                        type: boolean
+              example:
+                data:
+                  id: "tnt_42"
+                  fullName: "Jordan Lee"
+                  email: "jordan.lee@example.com"
+                  phone: "+1-415-555-0199"
+                total: 1
+                meta:
+                  hasMore: false
+        "404":
+          description: >-
+            Returned when no tenant exists for the given id or the id belongs to another organization in this multi-tenant API.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "500":
+          description: >-
+            Returned when an unexpected server-side error prevents tenant details from being retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+    patch:
+      summary: Update tenant profile
+      description: >-
+        Applies partial updates to contact information, notification preferences, or accessibility notes without replacing the entire resource.
+      operationId: updateTenant
+      tags: [Tenants]
+      security:
+        - legacyWeb: [tenants:write]
+      parameters:
+        - $ref: "#/components/parameters/TenantIdPath"
+      requestBody:
+        required: true
+        description: >-
+          JSON merge-patch style payload; omit fields that should remain unchanged. Sensitive identifiers cannot be updated here.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantPatch"
+            example:
+              phone: "+1-415-555-0142"
+      responses:
+        "200":
+          description: >-
+            Tenant record after successful patch; echoes normalized values such as E.164 phone formatting when applicable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+              example:
+                id: "tnt_42"
+                fullName: "Jordan Lee"
+                email: "jordan.lee@example.com"
+                phone: "+1-415-555-0142"
+        "400":
+          description: >-
+            Returned when the patch body is empty, uses unknown fields, or fails field-level validation rules enforced by the server.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "404":
+          description: >-
+            Returned when the tenant id is unknown or the caller is not authorized to modify this tenant profile in the demo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "500":
+          description: >-
+            Returned when an unexpected server-side error prevents tenant profile updates from being applied.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /leases:
+    summary: Leases collection
+    get:
+      summary: Search leases
+      description: >-
+        Query leases by property, unit, tenant, or date range; supports operations teams reconciling renewals and delinquency queues.
+      operationId: listLeases
+      tags: [Leases]
+      parameters:
+        - name: propertyId
+          in: query
+          description: Restrict results to leases whose primary unit belongs to this property id.
+          schema:
+            type: string
+          example: "prop_001"
+        - name: tenantId
+          in: query
+          description: Restrict results to leases where this tenant is a signatory on the agreement.
+          schema:
+            type: string
+          example: "tnt_42"
+        - name: activeOnly
+          in: query
+          description: When true, only leases whose current date falls within the lease term window are returned.
+          schema:
+            type: boolean
+            default: true
+          example: true
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+          description: Maximum number of records to return
+          example: 25
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: pagination offset
+          example: 0
+      responses:
+        "200":
+          description: >-
+            Collection of lease headers with enough context to drill into GET /leases/{leaseId} for full clauses and rent schedules.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Lease"
+                  total:
+                    type: integer
+                    minimum: 0
+                  meta:
+                    type: object
+                    required: [total, limit, offset, hasMore]
+                    properties:
+                      total:
+                        type: integer
+                        minimum: 0
+                      limit:
+                        type: integer
+                        minimum: 1
+                      offset:
+                        type: integer
+                        minimum: 0
+                      hasMore:
+                        type: boolean
+              example:
+                items:
+                  - id: "lse_9001"
+                    tenantId: "tnt_42"
+                    unitId: "unit_12a"
+                    startDate: "2026-06-01"
+                    endDate: "2027-05-31"
+                    monthlyRentCents: 245000
+                    status: "active"
+                total: 1
+                meta:
+                  total: 1
+                  limit: 25
+                  offset: 0
+                  hasMore: false
+        "400":
+          description: >-
+            Returned when filter combinations are invalid or date-range parameters cannot be parsed as ISO 8601 instants.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "500":
+          description: >-
+            Returned when an unexpected server-side error prevents lease search results from being returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+    post:
+      summary: Create a new lease
+      description: >-
+        Opens a lease agreement linking a tenant to a unit; may trigger prorated first invoice and move-in checklist work orders.
+      operationId: createLease
+      tags: [Leases]
+      requestBody:
+        required: true
+        description: >-
+          Lease terms including rent amount, start and end dates, and references to tenant and unit; server validates no overlapping active lease on the unit.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LeaseCreate"
+            example:
+              tenantId: "tnt_42"
+              unitId: "unit_12a"
+              startDate: "2026-06-01"
+              endDate: "2027-05-31"
+              monthlyRentCents: 245000
+      responses:
+        "201":
+          description: >-
+            Lease created; response includes lease id and computed billing anchors used by the rent roll and delinquency jobs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lease"
+              example:
+                id: "lse_9001"
+                tenantId: "tnt_42"
+                unitId: "unit_12a"
+                startDate: "2026-06-01"
+                endDate: "2027-05-31"
+                monthlyRentCents: 245000
+                status: "active"
+        "400":
+          description: >-
+            Returned when dates overlap another active lease, rent is non-positive, or referenced tenant or unit ids are invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "409":
+          description: >-
+            Returned when the unit is not in a leasable state or business rules block duplicate primary leases for the tenant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "500":
+          description: >-
+            Returned when an unexpected server-side error prevents lease creation from completing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /leases/{leaseId}:
+    get:
+      summary: Get lease by id
+      description: >-
+        Returns the full lease including parties, rent schedule references, and addenda ids needed for legal or accounting exports.
+      operationId: getLease
+      tags: [Leases]
+      parameters:
+        - $ref: "#/components/parameters/LeaseIdPath"
+      responses:
+        "200":
+          description: >-
+            Authoritative lease document metadata and structured terms; use this before generating renewal offers or amendments.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Lease"
+                  meta:
+                    type: object
+                    required: [total, hasMore]
+                    properties:
+                      total:
+                        type: integer
+                        minimum: 0
+                      hasMore:
+                        type: boolean
+              example:
+                data:
+                  id: "lse_9001"
+                  tenantId: "tnt_42"
+                  unitId: "unit_12a"
+                  startDate: "2026-06-01"
+                  endDate: "2027-05-31"
+                  monthlyRentCents: 245000
+                  status: "active"
+                meta:
+                  total: 1
+                  hasMore: false
+        "404":
+          description: >-
+            Returned when the lease id is not found or belongs to a property outside the caller's permitted portfolio scope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "500":
+          description: >-
+            Returned when an unexpected server-side error prevents lease details from being retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+    patch:
+      summary: Amend lease terms
+      description: >-
+        Applies partial updates such as rent changes, renewal option flags, or notice addresses; does not replace the entire lease tree.
+      operationId: updateLease
+      tags: [Leases]
+      security:
+        - legacyWeb: [leases:write]
+      parameters:
+        - $ref: "#/components/parameters/LeaseIdPath"
+      requestBody:
+        required: true
+        description: >-
+          Partial lease update; constrained fields depend on lease state (e.g., certain edits blocked after move-in in this demo).
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LeasePatch"
+            example:
+              monthlyRentCents: 252500
+      responses:
+        "200":
+          description: >-
+            Updated lease representation reflecting accepted changes and any server-side normalization of monetary fields.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lease"
+              example:
+                id: "lse_9001"
+                tenantId: "tnt_42"
+                unitId: "unit_12a"
+                startDate: "2026-06-01"
+                endDate: "2027-05-31"
+                monthlyRentCents: 252500
+                status: "active"
+        "400":
+          description: >-
+            Returned when the amendment violates business rules, such as lowering rent below configured policy floors for the unit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "404":
+          description: >-
+            Returned when the lease id does not exist or the caller cannot amend this agreement under role-based access control.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "500":
+          description: >-
+            Returned when an unexpected server-side error prevents lease amendments from being applied.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+components:
+  securitySchemes:
+    legacyWeb:
+      type: oauth2
+      description: >-
+        Legacy browser-based OAuth2 authorization code flow kept only for demo purposes; prefer non-interactive flows for agents.
+      flows:
+        authorizationCode:
+          authorizationUrl: https://auth.example.com/oauth/authorize
+          tokenUrl: https://auth.example.com/oauth/token
+          scopes:
+            properties:read: Read property portfolio data
+            properties:write: Register or update properties
+            units:read: List units and occupancy for properties in scope
+            tenants:read: View tenant directory and profiles
+            tenants:write: Onboard or update tenant records
+            leases:read: View lease agreements and terms
+            leases:write: Create or amend leases
+
+  parameters:
+    PropertyIdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: >-
+        Stable property id returned by list and create operations; use in path-based reads, renewals, and vendor dispatch.
+      example: "prop_001"
+    PropertyIdNestedPath:
+      name: propertyId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: >-
+        Property whose unit inventory is being listed; must match an existing property id returned by portfolio APIs.
+      example: "prop_001"
+    TenantIdPath:
+      name: tenantId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: >-
+        Tenant identifier returned by POST /tenants or list endpoints; stable across lease renewals in this demo model.
+      example: "tnt_42"
+    LeaseIdPath:
+      name: leaseId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: >-
+        Lease identifier assigned when the agreement is created; referenced by billing runs and renewal automation jobs.
+      example: "lse_9001"
+
+  schemas:
+    Property:
+      title: Property Record
+      description: A row
+      type: object
+      properties:
+        id:
+          type: string
+          pattern: '^[A-Za-z0-9_-]+$'
+          description: id
+        name:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9 .,&()/#''-]*$'
+          description: >-
+            Marketing or legal name of the property (building or parcel) as shown to tenants and on lease documents.
+      example:
+        id: "prop_001"
+        name: "Sunset Apartment Complex"
+
+    ErrorBody:
+      title: Error Response
+      description: >-
+        Standard error envelope for this demo API; clients may surface `message` to humans and branch on `code` for retries.
+      type: object
+      required: [type, title, detail, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          pattern: '^https?://.+$'
+          description: URI reference that identifies the problem type according to RFC 7807.
+        title:
+          type: string
+          pattern: '^[^\r\n]{1,120}$'
+          description: Short, human-readable summary of the problem type.
+        detail:
+          type: string
+          pattern: '^[^\r\n]{1,1000}$'
+          description: Human-readable explanation specific to this occurrence of the problem.
+        status:
+          type: integer
+          minimum: 100
+          maximum: 599
+          description: HTTP status code generated by the origin server for this occurrence.
+        instance:
+          type: string
+          format: uri
+          pattern: '^https?://.+$'
+          description: URI reference that identifies the specific occurrence of the problem.
+        message:
+          type: string
+          format: error-messag
+          pattern: '^[^\r\n]{1,500}$'
+          description: Legacy summary retained for backward compatibility in this demo API.
+        code:
+          type: string
+          format: error-code
+          pattern: '^[A-Z0-9_]+$'
+          description: >-
+            Optional stable machine-readable error code (for example `LEASE_OVERLAP`) used by integrations and test suites.
+      example:
+        type: "https://api.example.com/errors/invalid-lease-dates"
+        title: "Lease Dates Invalid"
+        detail: "Requested lease start date conflicts with existing active lease for unit unit_12a"
+        status: 400
+        instance: "https://api.example.com/errors/instances/abc-123"
+        message: "Lease dates overlap with existing agreement"
+        code: "LEASE_OVERLAP"
+
+    Unit:
+      title: Rental Unit
+      description: >-
+        A single rentable space within a property (apartment, retail bay, parking stall bundle, etc.) with occupancy metadata.
+      type: object
+      required: [id, propertyId, unitNumber, status]
+      properties:
+        id:
+          type: string
+          format: unit-id
+          pattern: '^[A-Za-z0-9_-]+$'
+          description: Server-assigned unit id used in lease and work-order payloads across the property management domain.
+          example: "unit_12a"
+        propertyId:
+          type: string
+          format: property-id
+          pattern: '^[A-Za-z0-9_-]+$'
+          description: Parent property id; must match the property segment in the URL when listing via nested routes.
+          example: "prop_001"
+        unitNumber:
+          type: string
+          format: unit-number
+          pattern: '^[A-Za-z0-9][A-Za-z0-9 .-]*$'
+          description: >-
+            Human-facing label such as "12A" or "Retail-3"; not guaranteed globally unique without the propertyId prefix.
+          example: "12A"
+        bedrooms:
+          type: number
+          format: float
+          description: >-
+            Optional bedroom count for residential inventory; omit or null for commercial-only units in mixed-use portfolios.
+          example: 2
+        bathrooms:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 20
+          description: Optional bathroom count for marketing filters and rent comparables in reporting dashboards.
+          example: 1
+        status:
+          type: string
+          enum: [occupied, vacant]
+          format: occupancy-status
+          pattern: '^[a-z_]+$'
+          description: >-
+            Occupancy snapshot: `occupied` when an active lease covers the unit; `vacant` when no qualifying lease exists today.
+          example: vacant
+      example:
+        id: "unit_12a"
+        propertyId: "prop_001"
+        unitNumber: "12A"
+        bedrooms: 2
+        bathrooms: 1
+        status: "vacant"
+
+    Tenant:
+      title: Tenant
+      description: >-
+        Tenant party record for individuals or organizations leasing space; used for portal access and compliance exports.
+      type: object
+      required: [id, fullName, email]
+      properties:
+        id:
+          type: string
+          format: tenant-id
+          pattern: '^[A-Za-z0-9_-]+$'
+          description: Unique tenant id in the organization; stable across multiple concurrent leases in this demo.
+          example: "tnt_42"
+        fullName:
+          type: string
+          format: person-name
+          pattern: '^[A-Za-z0-9][A-Za-z0-9 .,''-]*$'
+          description: Legal or preferred display name printed on notices and used in search indexes for staff workflows.
+          example: "Jordan Lee"
+        email:
+          type: string
+          format: email
+          pattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+          description: Primary contact email for portal login invites and billing notifications in the demo environment.
+          example: "jordan.lee@example.com"
+        phone:
+          type: string
+          format: phone-number
+          pattern: '^\+?[0-9][0-9\- ]{6,23}$'
+          description: Optional E.164 or locally formatted phone used for SMS alerts and emergency contact trees.
+          example: "+1-415-555-0199"
+      example:
+        id: "tnt_42"
+        fullName: "Jordan Lee"
+        email: "jordan.lee@example.com"
+        phone: "+1-415-555-0199"
+
+    TenantCreate:
+      description: >-
+        Payload for onboarding a tenant before lease execution; excludes server-assigned ids and read-only audit fields.
+      type: object
+      required: [fullName, email]
+      properties:
+        fullName:
+          type: string
+          format: person-name
+          pattern: '^[A-Za-z0-9][A-Za-z0-9 .,''-]*$'
+          description: Full legal name or registered business name for the tenant record and screening artifacts.
+        email:
+          type: string
+          format: email
+          pattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+          description: Unique within the organization for portal provisioning in this simplified demo model.
+        phone:
+          type: string
+          format: phone-number
+          pattern: '^\+?[0-9][0-9\- ]{6,23}$'
+          description: Optional phone captured at onboarding for multi-factor enrollment and vendor coordination.
+
+    TenantPatch:
+      description: >-
+        Partial update for tenant profile fields; unknown properties should be rejected by strict servers in production systems.
+      type: object
+      properties:
+        fullName:
+          type: string
+          format: person-name
+          pattern: '^[A-Za-z0-9][A-Za-z0-9 .,''-]*$'
+          description: Updated display or legal name after marriage, DBA change, or corporate restructuring events.
+        email:
+          type: string
+          format: email
+          pattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+          description: New primary email when the tenant requests a portal login change and passes verification checks.
+        phone:
+          type: string
+          format: phone-number
+          pattern: '^\+?[0-9][0-9\- ]{6,23}$'
+          description: Replacement phone number for SMS and voice routing after contact preference updates.
+
+    Lease:
+      title: Lease Agreement
+      description: >-
+        Lease agreement binding a tenant to a unit for a term, including rent and lifecycle state for renewals and delinquency.
+      type: object
+      required: [id, tenantId, unitId, startDate, endDate, monthlyRentCents, status]
+      properties:
+        id:
+          type: string
+          format: lease-id
+          pattern: '^[A-Za-z0-9_-]+$'
+          description: Lease id referenced by ledger exports and renewal offer generation jobs in the demo platform.
+          example: "lse_9001"
+        tenantId:
+          type: string
+          format: tenant-id
+          pattern: '^[A-Za-z0-9_-]+$'
+          description: Primary tenant signatory on the lease; co-tenants may be modeled in extended versions of this API.
+          example: "tnt_42"
+        unitId:
+          type: string
+          format: unit-id
+          pattern: '^[A-Za-z0-9_-]+$'
+          description: Unit covered by this lease; combined with dates determines exclusivity rules enforced on create.
+          example: "unit_12a"
+        startDate:
+          type: string
+          format: date
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: Lease commencement date in the property local calendar; used for proration and move-in milestones.
+          example: "2026-06-01"
+        endDate:
+          type: string
+          format: date
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: Lease end date inclusive of notice windows configured per jurisdiction in production deployments.
+          example: "2027-05-31"
+        monthlyRentCents:
+          type: integer
+          minimum: 0
+          maximum: 100000000
+          description: >-
+            Recurring rent in minor currency units (cents) for the demo; billing integrations map this to invoice line items.
+          example: 245000
+        status:
+          type: string
+          enum: [draft, active, ended, cancelled]
+          format: lease-status
+          pattern: '^[a-z_]+$'
+          description: >-
+            Lifecycle state: `draft` before countersign, `active` during occupancy, `ended` after natural expiry, `cancelled` otherwise.
+          example: active
+      example:
+        id: "lse_9001"
+        tenantId: "tnt_42"
+        unitId: "unit_12a"
+        startDate: "2026-06-01"
+        endDate: "2027-05-31"
+        monthlyRentCents: 245000
+        status: "active"
+
+    LeaseCreate:
+      title: Create Lease Request
+      description: >-
+        Request body to originate a lease; server validates unit availability and tenant eligibility before persisting the agreement.
+      type: object
+      required: [tenantId, unitId, startDate, endDate, monthlyRentCents]
+      properties:
+        tenantId:
+          type: string
+          format: tenant-id
+          pattern: '^[A-Za-z0-9_-]+$'
+          description: Existing tenant id from onboarding; must not be blocked for delinquency in this demo's rule engine.
+        unitId:
+          type: string
+          format: unit-id
+          pattern: '^[A-Za-z0-9_-]+$'
+          description: Target unit id under a property in the caller's portfolio; must be vacant or explicitly overridable.
+        startDate:
+          type: string
+          format: date
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: Agreement start; may align with first invoice date and default work-order templates for move-in prep.
+        endDate:
+          type: string
+          format: date
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: Agreement end; renewal offers typically trigger relative to this date based on notice policy settings.
+        monthlyRentCents:
+          type: integer
+          minimum: 0
+          maximum: 100000000
+          description: Base monthly rent before concessions; concessions would appear in a richer billing extension.
+      example:
+        tenantId: "tnt_42"
+        unitId: "unit_12a"
+        startDate: "2026-06-01"
+        endDate: "2027-05-31"
+        monthlyRentCents: 245000
+
+    LeasePatch:
+      title: Update Lease Request
+      description: >-
+        Partial amendment payload for rent or term adjustments; invalid combinations yield 400 with structured error details.
+      type: object
+      properties:
+        monthlyRentCents:
+          type: integer
+          minimum: 0
+          maximum: 100000000
+          description: Updated recurring rent after approved increases, concessions ending, or indexed escalations.
+        endDate:
+          type: string
+          format: date
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          description: Extended or shortened lease end when renewals or early terminations are negotiated and recorded.
+      example:
+        monthlyRentCents: 252500
