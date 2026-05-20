@@ -1,0 +1,511 @@
+openapi: 3.0.3
+info:
+  title: ShopWave Orders API
+  description: |
+    Order placement, returns, and refunds — the full B2B commerce loop in a single API.
+    Buyers place orders, request returns against delivered orders, and Marketplace Ops
+    issues refunds. Bundled with `PaymentsAPI` as part of the `ShopWaveProduct` API
+    Product (PaymentsAPI is internal-only and re-exposed via the product to B2B partners).
+
+    For real-time push notifications on order state changes
+    (order.placed / order.shipped / order.delivered), see `OrderEventsAPI` (WebSub).
+    For live WebSocket tracking of fulfillment progress, see `OrderTrackingAPI`.
+  version: 1.0.0
+  contact:
+    name: ShopWave Platform Team
+    email: platform@shopwave.com
+  x-data-class: public
+  x-api-owner: daniel@shopwave.com
+
+servers:
+  - url: http://20.6.11.167:8080/shopwave-backends/v1
+    description: Local / Tomcat
+
+tags:
+  - name: Orders
+    description: Order placement and lifecycle
+  - name: Returns
+    description: Return request lifecycle
+  - name: Refunds
+    description: Refund processing for approved returns
+
+security:
+  - oauth2: [ orders:read ]
+
+paths:
+  /orders:
+    get:
+      operationId: listOrders
+      summary: List orders
+      tags: [ Orders ]
+      security:
+        - oauth2: [ orders:read ]
+      parameters:
+        - name: customerId
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Paginated order list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    post:
+      operationId: createOrder
+      summary: Place a new order
+      tags: [ Orders ]
+      security:
+        - oauth2: [ orders:write ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderRequest"
+      responses:
+        "201":
+          description: Order created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      summary: Get order by ID
+      tags: [ Orders ]
+      parameters:
+        - $ref: "#/components/parameters/orderId"
+      responses:
+        "200":
+          description: Order detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /returns:
+    get:
+      operationId: listReturns
+      summary: List return requests
+      tags: [ Returns ]
+      parameters:
+        - name: customerId
+          in: query
+          description: Filter by customer (email or ID)
+          schema:
+            type: string
+          example: rohan@shopwave.com
+        - name: orderId
+          in: query
+          description: Filter by originating order
+          schema:
+            type: string
+          example: ORD-20001
+        - name: status
+          in: query
+          description: Filter by return status
+          schema:
+            type: string
+            enum: [ REQUESTED, APPROVED, RECEIVED, REFUNDED, REJECTED ]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Paginated return list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReturnPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    post:
+      operationId: createReturn
+      summary: Initiate a return
+      description: |
+        Creates a return request in REQUESTED state. The buyer specifies which items
+        from a delivered order they want to return and provides a reason.
+      tags: [ Returns ]
+      security:
+        - oauth2: [ orders:write ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReturnRequest"
+            example:
+              orderId: ORD-20001
+              reason: Item arrived damaged
+              items:
+                - productId: P001
+                  quantity: 1
+                  reason: Sole came apart after first use
+      responses:
+        "201":
+          description: Return request created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Return"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: Order not found or not eligible for return
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Return already exists for this order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /returns/{returnId}:
+    get:
+      operationId: getReturn
+      summary: Get return details
+      tags: [ Returns ]
+      parameters:
+        - $ref: "#/components/parameters/returnId"
+      responses:
+        "200":
+          description: Return detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Return"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /returns/{returnId}/refund:
+    post:
+      operationId: processRefund
+      summary: Process refund for an approved return
+      description: |
+        Triggers the refund for a return that is in APPROVED or RECEIVED state.
+        Calls `PaymentsAPI` internally and transitions the return to REFUNDED.
+        Restricted to Marketplace Ops role.
+      tags: [ Refunds ]
+      security:
+        - oauth2: [ marketplace:admin ]
+      parameters:
+        - $ref: "#/components/parameters/returnId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: number
+                  format: double
+                  description: Override refund amount. Omit to refund the full return value.
+                  example: 89.99
+      responses:
+        "200":
+          description: Refund processed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Refund"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Return is not in a refundable state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  parameters:
+    orderId:
+      name: orderId
+      in: path
+      required: true
+      schema:
+        type: string
+      example: ORD-20001
+    returnId:
+      name: returnId
+      in: path
+      required: true
+      schema:
+        type: string
+      example: RET-30001
+
+  schemas:
+    OrderItem:
+      type: object
+      required: [ productId, quantity, unitPrice ]
+      properties:
+        productId:
+          type: string
+        productName:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+        unitPrice:
+          type: number
+          format: double
+        lineTotal:
+          type: number
+          format: double
+          readOnly: true
+
+    Order:
+      type: object
+      properties:
+        id:
+          type: string
+        customerId:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderItem"
+        status:
+          type: string
+          enum: [ PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED ]
+        subtotal:
+          type: number
+          format: double
+        tax:
+          type: number
+          format: double
+        total:
+          type: number
+          format: double
+        shippingAddress:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    OrderPage:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/Order"
+        total:
+          type: integer
+        page:
+          type: integer
+        size:
+          type: integer
+
+    OrderRequest:
+      type: object
+      required: [ customerId, items ]
+      properties:
+        customerId:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderItem"
+        shippingAddress:
+          type: string
+
+    ReturnItem:
+      type: object
+      required: [ productId, quantity ]
+      properties:
+        productId:
+          type: string
+          example: P001
+        productName:
+          type: string
+          example: TrailBlaze Pro Hiking Boots
+        quantity:
+          type: integer
+          minimum: 1
+          example: 1
+        unitPrice:
+          type: number
+          format: double
+          example: 89.99
+        reason:
+          type: string
+          example: Sole came apart after first use
+
+    ReturnRequest:
+      type: object
+      required: [ orderId, items, reason ]
+      properties:
+        orderId:
+          type: string
+          example: ORD-20001
+        reason:
+          type: string
+          example: Item arrived damaged
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ReturnItem"
+
+    Return:
+      type: object
+      properties:
+        returnId:
+          type: string
+          example: RET-30001
+        orderId:
+          type: string
+          example: ORD-20001
+        customerId:
+          type: string
+          example: rohan@shopwave.com
+        reason:
+          type: string
+          example: Item arrived damaged
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReturnItem"
+        status:
+          type: string
+          enum: [ REQUESTED, APPROVED, RECEIVED, REFUNDED, REJECTED ]
+          example: REQUESTED
+        refundAmount:
+          type: number
+          format: double
+          example: 89.99
+        refundId:
+          type: string
+          description: Set once refund is processed
+          example: REF-40001
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ReturnPage:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/Return"
+        total:
+          type: integer
+        page:
+          type: integer
+        size:
+          type: integer
+
+    Refund:
+      type: object
+      properties:
+        refundId:
+          type: string
+          example: REF-40001
+        returnId:
+          type: string
+          example: RET-30001
+        orderId:
+          type: string
+          example: ORD-20001
+        amount:
+          type: number
+          format: double
+          example: 89.99
+        currency:
+          type: string
+          example: USD
+        status:
+          type: string
+          enum: [ SUCCEEDED, PENDING, FAILED ]
+          example: SUCCEEDED
+        processedAt:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://auth.shopwave.com/oauth2/authorize
+          tokenUrl: https://auth.shopwave.com/oauth2/token
+          scopes:
+            orders:read: Read orders and returns
+            orders:write: Place orders and initiate returns
+            marketplace:admin: Marketplace Ops operations (approve, refund)

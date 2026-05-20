@@ -1,0 +1,260 @@
+openapi: 3.0.3
+info:
+  title: ShopWave Payments API
+  description: |
+    Internal egress proxy to Stripe. Handles charge creation, refunds, and
+    payment method listing. Carries the egress API story — inbound callers use
+    ShopWave OAuth2; outbound calls to Stripe use a platform-managed Stripe key
+    that is never exposed to consumers.
+  version: 1.0.0
+  contact:
+    name: ShopWave Platform Team
+    email: platform@shopwave.com
+  x-data-class: internal
+  x-api-owner: platform@shopwave.com
+
+servers:
+  - url: http://20.6.11.167:8080/shopwave-backends/v1/payments
+    description: Local / Tomcat
+
+tags:
+  - name: Charges
+    description: Payment charge operations
+  - name: Refunds
+    description: Refund operations
+  - name: Methods
+    description: Saved payment methods
+
+security:
+  - oauth2: [payments:write]
+
+paths:
+  /charges:
+    post:
+      operationId: createCharge
+      summary: Create a charge
+      description: Charges the given payment method for the specified order amount. Proxied to Stripe behind the scenes.
+      tags: [Charges]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChargeRequest'
+            example:
+              orderId: ORD-20003
+              amount: 97.83
+              currency: USD
+              paymentMethodId: pm_card_visa_4242
+      responses:
+        '201':
+          description: Charge succeeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Charge'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '402':
+          description: Payment declined
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /charges/{chargeId}:
+    get:
+      operationId: getCharge
+      summary: Get charge details
+      tags: [Charges]
+      parameters:
+        - name: chargeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Charge details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Charge'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /refunds:
+    post:
+      operationId: createRefund
+      summary: Refund a charge
+      tags: [Refunds]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefundRequest'
+      responses:
+        '201':
+          description: Refund created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Refund'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /methods:
+    get:
+      operationId: listPaymentMethods
+      summary: List saved payment methods
+      tags: [Methods]
+      security:
+        - oauth2: [payments:read]
+      parameters:
+        - name: customerId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payment method list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PaymentMethod'
+
+components:
+  schemas:
+    ChargeRequest:
+      type: object
+      required: [orderId, amount, paymentMethodId]
+      properties:
+        orderId:
+          type: string
+        amount:
+          type: number
+          format: double
+          minimum: 0.01
+        currency:
+          type: string
+          default: USD
+        paymentMethodId:
+          type: string
+
+    Charge:
+      type: object
+      properties:
+        chargeId:
+          type: string
+        orderId:
+          type: string
+        amount:
+          type: number
+          format: double
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [SUCCEEDED, FAILED, PENDING]
+        paymentMethodId:
+          type: string
+        stripeChargeId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    RefundRequest:
+      type: object
+      required: [chargeId]
+      properties:
+        chargeId:
+          type: string
+        amount:
+          type: number
+          format: double
+          description: Partial refund amount. Omit for full refund.
+
+    Refund:
+      type: object
+      properties:
+        refundId:
+          type: string
+        chargeId:
+          type: string
+        amount:
+          type: number
+          format: double
+        currency:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    PaymentMethod:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [card, bank_transfer]
+        brand:
+          type: string
+        last4:
+          type: string
+        expMonth:
+          type: integer
+        expYear:
+          type: integer
+        customerId:
+          type: string
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://auth.shopwave.com/oauth2/token
+          scopes:
+            payments:read: Read payment data
+            payments:write: Create charges and refunds

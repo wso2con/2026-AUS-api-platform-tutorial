@@ -1,0 +1,202 @@
+arazzo: 1.0.0
+info:
+  title: ShopWave Order Journey
+  version: 1.0.0
+  description: >
+    Two sequential workflows covering the ShopWave commerce loop. Workflow 1:
+    Browse the catalog, select a product, place an order, and charge payment.
+    Workflow 2: List customer orders, initiate a return, look up the original
+    charge, and issue a refund.
+
+sourceDescriptions:
+  - name: catalogApi
+    url: ./catalog-api/openapi.yaml
+    type: openapi
+  - name: ordersApi
+    url: ./orders-api/openapi.yaml
+    type: openapi
+  - name: paymentsApi
+    url: ./payments-api/openapi.yaml
+    type: openapi
+
+workflows:
+
+  # ──────────────────────────────────────────────────────────────
+  # Workflow 1: Browse catalog → place order → charge payment
+  # ──────────────────────────────────────────────────────────────
+  - workflowId: browse_and_place_order
+    summary: >
+      A buyer searches the ShopWave catalog, inspects a product, places an
+      order, and pays for it in a single sequential flow.
+    inputs:
+      type: object
+      properties:
+        searchQuery:
+          type: string
+          default: hiking boots
+        customerId:
+          type: string
+          default: rohan@shopwave.com
+        shippingAddress:
+          type: string
+          default: "123 Main St, Springfield, USA"
+        paymentMethodId:
+          type: string
+          default: pm_card_visa_4242
+
+    steps:
+      - stepId: searchProducts
+        description: Search the catalog for a matching product.
+        operationId: listProducts
+        parameters:
+          - name: q
+            in: query
+            value: "$inputs.searchQuery"
+          - name: size
+            in: query
+            value: 5
+        successCriteria:
+          - condition: "$statusCode == 200"
+        outputs:
+          firstProductId: "$response.body#/content/0/id"
+          firstProductName: "$response.body#/content/0/name"
+          firstProductPrice: "$response.body#/content/0/price"
+
+      - stepId: getProductDetail
+        description: Retrieve full product details to confirm stock and price.
+        operationId: getProduct
+        parameters:
+          - name: productId
+            in: path
+            value: "$steps.searchProducts.outputs.firstProductId"
+        successCriteria:
+          - condition: "$statusCode == 200"
+        outputs:
+          productName: "$response.body#/name"
+          productPrice: "$response.body#/price"
+          inStock: "$response.body#/inStock"
+
+      - stepId: placeOrder
+        description: Place a new order for the selected product.
+        operationId: createOrder
+        requestBody:
+          contentType: application/json
+          payload:
+            customerId: "$inputs.customerId"
+            shippingAddress: "$inputs.shippingAddress"
+            items:
+              - productId: "$steps.searchProducts.outputs.firstProductId"
+                productName: "$steps.getProductDetail.outputs.productName"
+                quantity: 1
+                unitPrice: "$steps.getProductDetail.outputs.productPrice"
+        successCriteria:
+          - condition: "$statusCode == 201"
+        outputs:
+          orderId: "$response.body#/id"
+          orderTotal: "$response.body#/total"
+
+      - stepId: chargePayment
+        description: Charge the buyer's payment method for the order total.
+        operationId: createCharge
+        requestBody:
+          contentType: application/json
+          payload:
+            orderId: "$steps.placeOrder.outputs.orderId"
+            amount: "$steps.placeOrder.outputs.orderTotal"
+            currency: USD
+            paymentMethodId: "$inputs.paymentMethodId"
+        successCriteria:
+          - condition: "$statusCode == 201"
+        outputs:
+          chargeId: "$response.body#/chargeId"
+          chargeStatus: "$response.body#/status"
+
+    outputs:
+      orderId: "$steps.placeOrder.outputs.orderId"
+      orderTotal: "$steps.placeOrder.outputs.orderTotal"
+      chargeId: "$steps.chargePayment.outputs.chargeId"
+      chargeStatus: "$steps.chargePayment.outputs.chargeStatus"
+
+  # ──────────────────────────────────────────────────────────────
+  # Workflow 2: List orders → initiate return → look up charge → refund
+  # ──────────────────────────────────────────────────────────────
+  - workflowId: return_and_refund
+    summary: >
+      Marketplace Ops lists a customer's orders, initiates a return for a
+      delivered order, retrieves the original charge, and issues a refund.
+    inputs:
+      type: object
+      properties:
+        customerId:
+          type: string
+          default: rohan@shopwave.com
+        chargeId:
+          type: string
+          default: ch_dd4fb3bebdde478cae78f4c3
+
+    steps:
+      - stepId: listCustomerOrders
+        description: Retrieve all orders for the customer.
+        operationId: listOrders
+        parameters:
+          - name: customerId
+            in: query
+            value: "$inputs.customerId"
+          - name: size
+            in: query
+            value: 10
+        successCriteria:
+          - condition: "$statusCode == 200"
+        outputs:
+          firstOrderId: "$response.body#/content/3/id"
+          firstOrderStatus: "$response.body#/content/3/status"
+
+      - stepId: lookUpReturn
+        description: Look up existing returns for the customer's order.
+        operationId: listReturns
+        parameters:
+          - name: customerId
+            in: query
+            value: "$inputs.customerId"
+          - name: orderId
+            in: query
+            value: "$steps.listCustomerOrders.outputs.firstOrderId"
+        successCriteria:
+          - condition: "$statusCode == 200"
+        outputs:
+          returnId: "$response.body#/content/0/returnId"
+          returnStatus: "$response.body#/content/0/status"
+          refundAmount: "$response.body#/content/0/refundAmount"
+
+      - stepId: getOriginalCharge
+        description: Look up the original charge so we have the amount to refund.
+        operationId: getCharge
+        parameters:
+          - name: chargeId
+            in: path
+            value: "$inputs.chargeId"
+        successCriteria:
+          - condition: "$statusCode == 200"
+        outputs:
+          chargeAmount: "$response.body#/amount"
+          chargeCurrency: "$response.body#/currency"
+
+      - stepId: issueRefund
+        description: Refund the original charge amount back to the buyer.
+        operationId: createRefund
+        requestBody:
+          contentType: application/json
+          payload:
+            chargeId: "$inputs.chargeId"
+            amount: "$steps.getOriginalCharge.outputs.chargeAmount"
+        successCriteria:
+          - condition: "$statusCode == 201"
+        outputs:
+          refundId: "$response.body#/refundId"
+          refundStatus: "$response.body#/status"
+
+    outputs:
+      returnId: "$steps.lookUpReturn.outputs.returnId"
+      returnStatus: "$steps.lookUpReturn.outputs.returnStatus"
+      refundId: "$steps.issueRefund.outputs.refundId"
+      refundStatus: "$steps.issueRefund.outputs.refundStatus"
